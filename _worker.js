@@ -7,7 +7,7 @@ const UPSTREAM = "https://visual-impacto-estudio.brunopentium.chatgpt.site";
 // Allow product catalog links to open the site's existing plan summary modal.
 // No plan content or checkout is duplicated here; the source site remains authoritative.
 const PLAN_KEYS = new Set(["piloto","presenca","vitrine","destaque"]);
-const PLAN_DEEP_LINK_SCRIPT = "<script id=\"visual-impacto-plan-deep-link\">\n(() => {\n  const plan = new URLSearchParams(location.search).get(\"plano\");\n  const labels = {piloto:\"experimentar o piloto\",presenca:\"quero o presenca\",vitrine:\"quero o vitrine\",destaque:\"quero o destaque\"};\n  if (!Object.prototype.hasOwnProperty.call(labels, plan)) return;\n  const norm = value => (value || \"\").normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g,\"\").toLowerCase().trim();\n  let attempts = 0;\n  let timer;\n  const check = () => {\n    const opened = [...document.querySelectorAll(\"h1,h2,h3\")].some(el => norm(el.textContent).includes(\"vamos criar sua presenca\") && el.getClientRects().length > 0);\n    if (opened || ++attempts > 30) { clearInterval(timer); return; }\n    const button = [...document.querySelectorAll(\"button\")].find(el => norm(el.textContent).includes(labels[plan]));\n    if (button) button.click();\n  };\n  const start = () => setTimeout(() => { check(); timer = setInterval(check, 500); }, 600);\n  if (document.readyState === \"complete\") start();\n  else window.addEventListener(\"load\", start, {once:true});\n})();\n</script>";
+const PLAN_DEEP_LINK_SCRIPT = "<script id=\"visual-impacto-plan-deep-link\">\n(function () {\n  var plan = new URLSearchParams(window.location.search).get(\"plano\");\n  var labels = { piloto: \"experimentar o piloto\", presenca: \"quero o presenca\", vitrine: \"quero o vitrine\", destaque: \"quero o destaque\" };\n  if (!Object.prototype.hasOwnProperty.call(labels, plan)) return;\n  function normalize(value) { return String(value || \"\").normalize(\"NFD\").replace(/[\\u0300-\\u036f]/g, \"\").toLowerCase().trim(); }\n  var ticks = 0;\n  var finished = false;\n  function attempt() {\n    if (finished) return;\n    var checkout = document.getElementById(\"checkout\");\n    if ((checkout && checkout.hasAttribute(\"open\")) || (document.body && document.body.classList.contains(\"modal-open\"))) {\n      finished = true;\n      document.documentElement.dataset.viDeepLink = \"opened-\" + plan;\n      return;\n    }\n    var buttons = Array.prototype.slice.call(document.querySelectorAll(\"button\"));\n    var button = buttons.find(function (el) { return normalize(el.textContent).indexOf(labels[plan]) >= 0; });\n    if (button) {\n      button.click();\n      document.documentElement.dataset.viDeepLink = \"clicked-\" + plan;\n    }\n    if (++ticks >= 80) {\n      finished = true;\n      if (!button) document.documentElement.dataset.viDeepLink = \"button-not-found\";\n    }\n  }\n  var timer = window.setInterval(function () {\n    attempt();\n    if (finished) window.clearInterval(timer);\n  }, 350);\n  if (document.readyState === \"loading\") document.addEventListener(\"DOMContentLoaded\", attempt, {once: true});\n  else attempt();\n  window.addEventListener(\"load\", attempt, {once: true});\n})();\n</script>";
 
 export default {
   async fetch(request) {
@@ -38,9 +38,14 @@ export default {
       if (request.method === "GET" && contentType.includes("text/html")) {
         let html = (await upstream.text()).split(UPSTREAM).join(incoming.origin);
         if (PLAN_KEYS.has(incoming.searchParams.get("plano"))) {
-          html = html.replace(/<\/body>/i, PLAN_DEEP_LINK_SCRIPT + "</body>");
+          html = html.replace(/<\/head>/i, PLAN_DEEP_LINK_SCRIPT + "</head>");
+          if (!html.includes('id="visual-impacto-plan-deep-link"')) {
+            html = html.replace(/<\/body>/i, PLAN_DEEP_LINK_SCRIPT + "</body>");
+          }
+          headers.set("x-visual-impacto-deep-link", "enabled");
+          headers.set("cache-control", "no-store");
         }
-        headers.set("cache-control", "public, max-age=120");
+        if (!PLAN_KEYS.has(incoming.searchParams.get("plano"))) headers.set("cache-control", "public, max-age=120");
         return new Response(html, { status: upstream.status, headers });
       }
       return new Response(upstream.body, { status: upstream.status, headers });
